@@ -11,7 +11,7 @@ import type { NormalizedEvent, RenderBlock, SessionMeta, SessionPatch, SideChat,
 export type { SideChat, StoredEvent };
 
 /** Bump when sessions/messages/messages_fts change shape (see constructor). */
-const SCHEMA_VERSION = 11;  // 11: claude non-human-origin prose lines → meta (10: claude skill commands title the session; 9: unknown-type triage — claude worktree state dropped, codex Desktop voice/agent/mcp/compaction; 8: messages(session_id, seq) index; 7: source_stamp/source_error columns replace the codex-* kv facts; 6: claude pasted_content unwrapped; 5: claude pr-link dropped; 4: claude isMeta user lines → meta; 3: codex escalated exec → approval row; 2: 0.153 token_usage_record/web.search)
+const SCHEMA_VERSION = 12;  // 12: claude off-tree unknown lines tallied (off_tree_json), raw unknown strings cut, CLI 2.1.300 request log dropped (11: claude non-human-origin prose lines → meta; 10: claude skill commands title the session; 9: unknown-type triage — claude worktree state dropped, codex Desktop voice/agent/mcp/compaction; 8: messages(session_id, seq) index; 7: source_stamp/source_error columns replace the codex-* kv facts; 6: claude pasted_content unwrapped; 5: claude pr-link dropped; 4: claude isMeta user lines → meta; 3: codex escalated exec → approval row; 2: 0.153 token_usage_record/web.search)
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   byte_offset INTEGER DEFAULT 0,
   parent_id TEXT, tool_use_id TEXT, workflow_id TEXT, ended_at INTEGER,
   turn_open INTEGER, turn_started_at INTEGER,
-  source_stamp TEXT, source_error TEXT   -- compressed sources: the physical file last replayed (or that failed), and why
+  source_stamp TEXT, source_error TEXT,  -- compressed sources: the physical file last replayed (or that failed), and why
+  off_tree_json TEXT                     -- {type: count} of unrecognized lines off the conversation tree
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT, session_id TEXT, seq INTEGER, role TEXT, ts INTEGER,
@@ -167,6 +168,19 @@ export function renderExcerpt(rows: ExcerptRow[]): string {
  *  that the "why" prose needs. The responder reads a cut result in full by
  *  Grepping the transcript for the row's timestamp (#21). */
 const TOOL_OUTPUT_HEAD = 300;
+
+/** A raw unknown row keeps its shape (type, subtype: the census and the
+ *  fold label read them) but not its bulk: a request log line can be 70 KB.
+ *  ponytail: cuts strings only; an object of many short strings lands whole. */
+const RAW_STRING_CAP = 2000;
+function capRaw(v: unknown): unknown {
+  if (typeof v === 'string') {
+    return v.length > RAW_STRING_CAP ? `${v.slice(0, RAW_STRING_CAP)}…[cut: ${v.length - RAW_STRING_CAP} more chars]` : v;
+  }
+  if (Array.isArray(v)) return v.map(capRaw);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, capRaw(x)]));
+  return v;
+}
 // askRows: row ceilings on the turn walk — an autonomous run's turn can be
 // thousands of rows of tool output (longest previous-turn distance seen: 332)
 const EXCERPT_MAX_REACH = 400;
@@ -197,7 +211,11 @@ export function unknownCensus(db: Database.Database): { adapter: string; type: s
       COUNT(*) AS count
     FROM messages m JOIN sessions s ON s.id = m.session_id
     WHERE m.role = 'unknown'
-    GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2`).all() as { adapter: string; type: string; count: number }[];
+    GROUP BY 1, 2
+    UNION ALL
+    SELECT s.adapter, j.key, SUM(j.value) FROM sessions s, json_each(s.off_tree_json) j
+    GROUP BY 1, 2
+    ORDER BY 3 DESC, 1, 2`).all() as { adapter: string; type: string; count: number }[];
 }
 
 export class Store {
@@ -273,7 +291,7 @@ export class Store {
     this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
     this.db.prepare(`UPDATE sessions SET file_path = ?, byte_offset = 0, message_count = 0,
       turn_open = NULL, turn_started_at = NULL, updated_at = started_at,
-      source_stamp = NULL, source_error = NULL WHERE id = ?`).run(filePath, id);
+      source_stamp = NULL, source_error = NULL, off_tree_json = NULL WHERE id = ?`).run(filePath, id);
     fill();
     // a compressed source records which physical file this view came from
     this.db.prepare('UPDATE sessions SET source_stamp = ? WHERE id = ?').run(stamp, id);
@@ -375,7 +393,7 @@ export class Store {
   resetSession(sessionId: string): void {
     this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
     this.db.prepare(`UPDATE sessions SET byte_offset = 0, message_count = 0,
-      title = '', title_source = NULL, source_stamp = NULL, source_error = NULL WHERE id = ?`).run(sessionId);
+      title = '', title_source = NULL, source_stamp = NULL, source_error = NULL, off_tree_json = NULL WHERE id = ?`).run(sessionId);
   }
 
   /** Append a batch of events and advance the checkpoint, in one transaction.
@@ -403,7 +421,7 @@ export class Store {
       // meta events keep their display label alongside the raw payload
       const body = ev.kind === 'message' ? ev.blocks
         : ev.kind === 'meta' ? { label: ev.label, raw: ev.raw }
-        : ev.raw;
+        : capRaw(ev.raw);
       const parentId = ev.kind === 'unknown' ? null : ev.parentId ?? null;
       insert.run(ev.id, sessionId, ++seq, role, ev.ts, JSON.stringify(body ?? null), textContent(ev), parentId);
       // only real messages count as activity — trailing bookkeeping writes
@@ -441,6 +459,15 @@ export class Store {
   }
 
   private applyPatch(sessionId: string, patch: SessionPatch): void {
+    if (patch.offTreeType) {
+      const cur = this.db.prepare('SELECT off_tree_json FROM sessions WHERE id = ?')
+        .get(sessionId) as { off_tree_json: string | null } | undefined;
+      if (cur) {
+        const tally = JSON.parse(cur.off_tree_json ?? '{}') as Record<string, number>;
+        tally[patch.offTreeType] = (tally[patch.offTreeType] ?? 0) + 1;
+        this.db.prepare('UPDATE sessions SET off_tree_json = ? WHERE id = ?').run(JSON.stringify(tally), sessionId);
+      }
+    }
     if (patch.parentId && patch.parentId !== sessionId) {
       this.db.prepare(`UPDATE sessions SET parent_id = ? WHERE id = ? AND parent_id IS NULL`)
         .run(patch.parentId, sessionId);

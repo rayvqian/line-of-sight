@@ -155,6 +155,10 @@ describe('claudeCode.parseLine on real fixture lines', () => {
     expect(adapter.parseLine(moved, ctx)).toHaveLength(0);
     const wt = JSON.stringify({ type: 'worktree-state', worktreeSession: null, sessionId: 's1' });
     expect(adapter.parseLine(wt, ctx)).toHaveLength(0);
+    // CLI ≥ 2.1.300 request log, owner and tool tally: no uuid, no content
+    for (const t of ['api-request', 'api-request-shape', 'api-request-blob', 'session-owner', 'tools-used']) {
+      expect(adapter.parseLine(JSON.stringify({ type: t, sessionId: 's1' }), ctx)).toHaveLength(0);
+    }
     // the fixture attachment is date_change — reminder-class, dropped
     expect(byType('attachment')).toHaveLength(0);
     // the fixture system line is turn_duration — timing bookkeeping, dropped
@@ -172,6 +176,7 @@ describe('claudeCode.parseLine on real fixture lines', () => {
     });
     expect(adapter.parseLine(mk('total_tokens_reminder'), ctx)).toHaveLength(0);
     expect(adapter.parseLine(mk('task_reminder'), ctx)).toHaveLength(0);
+    expect(adapter.parseLine(mk('deferred_tools_record'), ctx)).toHaveLength(0);
     expect(adapter.parseLine(mk('hook_success'), ctx)[0])
       .toMatchObject({ kind: 'meta', label: 'attachment: hook_success' });
     expect(adapter.parseLine(mk('some_future_subtype'), ctx)[0])
@@ -188,6 +193,16 @@ describe('claudeCode.parseLine on edge cases', () => {
     }
     const bad = adapter.parseLine('not json at all', ctx);
     expect(bad[0]).toMatchObject({ kind: 'unknown', id: `${ctx.filePath}:0` });
+  });
+
+  it('an unrecognized line off the tree (no uuid) is a tally patch, not a row', () => {
+    const off = JSON.stringify({ type: 'future-sidecar', sessionId: 's1', blob: 'x'.repeat(50) });
+    expect(adapter.parseLine(off, ctx)).toEqual([expect.objectContaining({
+      kind: 'meta', raw: null, sessionPatch: { offTreeType: 'future-sidecar' },
+    })]);
+    // on the tree it stays a raw row
+    const on = JSON.stringify({ type: 'future-sidecar', uuid: 'u9', sessionId: 's1' });
+    expect(adapter.parseLine(on, ctx)[0]).toMatchObject({ kind: 'unknown' });
   });
 });
 

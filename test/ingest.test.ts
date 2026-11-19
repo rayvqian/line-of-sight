@@ -123,6 +123,28 @@ describe('incremental ingest', () => {
     ]);
   });
 
+  it('off-tree unknown lines are tallied in the census, never stored as rows', () => {
+    const off = JSON.stringify({ type: 'future-sidecar', sessionId: SESSION }) + '\n';
+    fs.writeFileSync(file, line('u1', 'hi') + off + off);
+    ingester.ingestFile(adapter(), file);
+    expect(store.getEvents(SESSION).map((e) => e.kind)).toEqual(['message']);
+    expect(unknownCensus(store.db)).toEqual([{ adapter: 'claude-code', type: 'future-sidecar', count: 2 }]);
+    // a from-zero re-parse recounts instead of doubling
+    store.resetSession(SESSION);
+    ingester.ingestFile(adapter(), file);
+    expect(unknownCensus(store.db)).toEqual([{ adapter: 'claude-code', type: 'future-sidecar', count: 2 }]);
+  });
+
+  it('long strings in a raw unknown row are cut; its type survives', () => {
+    const big = JSON.stringify({ uuid: 'x1', type: 'future-row', blob: 'x'.repeat(100_000) }) + '\n';
+    fs.writeFileSync(file, line('u1', 'hi') + big);
+    ingester.ingestFile(adapter(), file);
+    const raw = store.getEvents(SESSION).find((e) => e.kind === 'unknown')!.body as { type: string; blob: string };
+    expect(raw.type).toBe('future-row');
+    expect(raw.blob.length).toBeLessThan(3000);
+    expect(raw.blob).toMatch(/more chars\]$/);
+  });
+
   it('a partial last line is not consumed until the newline arrives', () => {
     fs.writeFileSync(file, line('u1', 'hello') + '{"type":"user","uuid":"u2"');
     ingester.ingestFile(adapter(), file);

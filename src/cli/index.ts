@@ -193,7 +193,7 @@ async function cmdStatus(): Promise<void> {
     const rows = unknownCensus(db);
     db.close();
     if (!rows.length) return;
-    console.log(`unknown transcript lines: ${rows.reduce((n, r) => n + r.count, 0)} (render as raw; a CLI format this version does not parse)`);
+    console.log(`unknown transcript lines: ${rows.reduce((n, r) => n + r.count, 0)} (a CLI format this version does not parse; raw rows if on the conversation tree, hidden otherwise)`);
     for (const r of rows) console.log(`  ${r.adapter.padEnd(12)} ${r.type.padEnd(48)} ${r.count}`);
   } catch { /* census is advisory */ }
 }
@@ -260,6 +260,8 @@ async function cmdInspect(file: string | undefined): Promise<void> {
   if (tools.length) console.log(`tools: ${count(tools)}`);
   const unknown = events.filter((e) => e.kind === 'unknown');
   if (unknown.length) console.log(`unknown lines: ${count(unknown.map((e) => String((e.raw as { type?: unknown } | null)?.type ?? '?')))}`);
+  const offTree = events.flatMap((e) => e.kind === 'meta' && e.sessionPatch?.offTreeType ? [e.sessionPatch.offTreeType] : []);
+  if (offTree.length) console.log(`unknown off-tree lines (hidden): ${count(offTree)}`);
   const subDir = path.join(path.dirname(abs), path.basename(abs, '.jsonl'), 'subagents');
   if (fs.existsSync(subDir)) {
     const kids = fs.readdirSync(subDir, { withFileTypes: true, recursive: true })

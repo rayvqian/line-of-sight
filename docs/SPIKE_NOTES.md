@@ -975,3 +975,42 @@ sent a message: <agent-message…>`, channel: `A message arrived from X:\n
 <channel…>`), but a non-human line with prose is folded regardless of shape,
 so a future tag+prose agent message can't pass as the user. Tag-only lines
 (task-notification) stay messages for the plumbing card.
+
+## Addendum 2026-11-18 — request log lines (Claude Code 2.1.300+); off-tree lines leave the viewer
+
+From 2.1.300 the transcript also carries a log of each API request. None of
+these lines has a `uuid` or `parentUuid`:
+
+| type | shape | handling |
+|---|---|---|
+| `api-request` | `{id, timestamp, version, querySource, shapeHash, params, keep, tail: [hash…], cacheControl, requestDigest}` | dropped |
+| `api-request-shape` | `{shapeHash, timestamp, version, shape}`: the system prompt and tool list, as a string | dropped |
+| `api-request-blob` | `{hash, message}`: one request message as a JSON string, often 10 KB+ | dropped |
+| `session-owner` | `{accountUuid, organizationUuid, sessionId}` | dropped |
+| `tools-used` | `{tools: [name…]}` | dropped |
+
+Also the attachment subtype `deferred_tools_record` (`{entries: [{name,
+description, …}]}`), the full-list sibling of `deferred_tools_delta`: dropped.
+
+They used to reach the viewer as raw fallback rows, several per turn. Local
+survey: 2514 `api-request`, 3573 `api-request-blob`, 191 `api-request-shape`,
+410 `session-owner`, 91 `tools-used`, about 65 MB of JSON, plus 2114
+`deferred_tools_record`. The owner line holds account ids that should not sit
+in the store.
+
+This was the fourth round of uuid-less bookkeeping types showing up as raw
+rows until a release listed them. The survey also shows why: across 598
+transcripts (about 130k lines), `user`, `assistant`, `attachment` and
+`system` carry a `uuid` on every line, and the 21 other types carry none. A
+line without a `uuid` is not a node of the conversation tree; it is session
+state. So an unrecognized line with no `uuid` is no longer rendered. It
+becomes a patch-only event that tallies its type on the session row
+(`off_tree_json`), and `sight status` lists it next to the raw rows; `sight
+inspect` lists it too. Unknown lines with a `uuid`, and unparseable lines,
+still render raw. Raw rows now keep their shape but cut each string at 2000
+characters; this applies to Codex raw rows too.
+
+The risk: `queue-operation` has no `uuid` but carries text the user typed.
+A future line like it would be hidden, visible only as a census count, until
+an adapter handles it. `DROP_TYPES` stays, now to keep known bookkeeping out
+of the census rather than out of the viewer.

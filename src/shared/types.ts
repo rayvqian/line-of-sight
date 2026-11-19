@@ -52,6 +52,9 @@ export interface SessionPatch {
   /** Turn boundary markers (last-wins): true at turn start, false at end. */
   turnOpen?: boolean;
   turnStartedAt?: number;
+  /** An unrecognized line outside the conversation tree: tallied per
+   *  session for the unknown-line census, never rendered. */
+  offTreeType?: string;
 }
 
 export type NormalizedEvent =
