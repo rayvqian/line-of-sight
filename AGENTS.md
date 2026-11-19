@@ -21,8 +21,9 @@ parse; `docs/SPEC.md` is what v1 is and, just as important, is not.
   (question, answers, and the conversation snapshot taken when the question
   was asked) stay; nothing else does, and nothing does by default.
 - **Parse transcripts defensively.** Schemas are undocumented and change between
-  CLI versions. Unknown entry types render as a raw fallback, never crash
-  ingestion.
+  CLI versions. Unknown entry types never crash ingestion. On the
+  conversation tree they render as a raw fallback; off it (Claude Code lines
+  with no `uuid`) they are counted in `sight status`, not rendered.
 
 ## Working style
 

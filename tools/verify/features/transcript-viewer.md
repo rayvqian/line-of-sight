@@ -9,7 +9,7 @@ else folds.
 - messages: user prompts and assistant text as Markdown, one `.event[data-mid]` each
 - step-folding: runs of tool calls, thinking and meta collapse into "N steps · M tool calls"
 - tool-rows: inside an open fold, each tool call is its own collapsed row
-- raw-fallback: unrecognized entries render as a collapsed "raw block", never dropped
+- raw-fallback: unrecognized entries render as a collapsed "raw block"; a Claude Code line with no `uuid` is off the conversation tree and is counted by `sight status` instead
 - copy-markdown: per-message button that copies the message's source Markdown
 - reply-draft: "✎ Draft reply" at the tail opens a compose card; Copy is its only action; the draft persists per session
 

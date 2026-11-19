@@ -317,13 +317,14 @@ CREATE TABLE sessions (
   byte_offset INTEGER DEFAULT 0,  -- always at a line boundary; partial tails re-read
   parent_id TEXT, tool_use_id TEXT, workflow_id TEXT, ended_at INTEGER,  -- subagent runs (§4)
   turn_open INTEGER, turn_started_at INTEGER,  -- agents with turn markers; NULL otherwise
-  source_stamp TEXT, source_error TEXT         -- compressed sources: file last replayed / why it failed (§4)
+  source_stamp TEXT, source_error TEXT,        -- compressed sources: file last replayed / why it failed (§4)
+  off_tree_json TEXT                           -- {type: count}: unknown lines off the conversation tree, for the census
 );
 CREATE TABLE messages (
   id TEXT, session_id TEXT, seq INTEGER,
   role TEXT,                      -- user | assistant | meta | unknown
   ts INTEGER,
-  blocks_json TEXT,               -- serialized RenderBlock[] (meta: {label, raw}; unknown: raw)
+  blocks_json TEXT,               -- serialized RenderBlock[] (meta: {label, raw}; unknown: raw, strings cut at 2000 chars)
   text_content TEXT,              -- search text: dialog only, markdown stripped
   parent_id TEXT,                 -- transcript tree; a fork marks the abandoned branch
   PRIMARY KEY (session_id, id)

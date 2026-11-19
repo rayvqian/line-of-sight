@@ -76,7 +76,9 @@ it, and otherwise behaves exactly like `claude`.
     (Evolved after real use from turn-level folding — decided
     2026-08-25.)
   - Unknown/unparseable entries render as a collapsed raw-JSON block (never
-    crash, never silently drop).
+    crash, never silently drop). Exception: an unknown Claude Code line with
+    no `uuid` sits outside the conversation tree, so it is not rendered; it
+    is counted in `sight status` instead (decided 2026-11-18).
 - **Live tail**: while the session file grows, new turns append in near-real
   time (≤ 2s latency) via SSE. Auto-scroll follows the tail only if the user is
   already at the bottom (standard log-viewer behavior).
@@ -235,7 +237,8 @@ Rules:
   invocations. Trivially auditable (all fetch/spawn sites in a few files).
 - **Robustness**: malformed jsonl lines are skipped with a logged warning;
   a schema change in a future Claude Code version must degrade to raw-JSON
-  rendering, not crash.
+  rendering (or, off the conversation tree, to a `sight status` count), not
+  crash.
 - **Platform**: macOS first (dev machine, darwin). Avoid gratuitous
   darwin-only APIs; Linux support should be a config-paths problem, not a
   rewrite.

@@ -7,8 +7,9 @@ import type { AgentAdapter } from './types.js';
 import { parseTs, str, truncate } from './util.js';
 
 // Line types that carry no conversational content (see SPIKE_NOTES.md);
-// dropped from the event stream. Truly unknown types still fall through
-// to the `unknown` fallback, so future schema additions stay visible.
+// dropped from the event stream. Unknown types still surface: on the tree
+// (with a uuid) as a raw row, off it as a census tally (`sight status`), so
+// listing a known one here keeps the census about real drift.
 // `queue-operation` is NOT here (it was until 2026-08-26): its enqueue/remove
 // ops carry the text the user typed while the agent worked — the viewer
 // derives the "queued, not yet read" strip from them (web/src/queue.ts).
@@ -29,6 +30,11 @@ const DROP_TYPES = new Set([
   // Enter/ExitWorktree tool results already show path and branch. Wanted
   // later as session state for a header chip (#18), not as rows.
   'relocated', 'worktree-state',
+  // CLI ≥ 2.1.300 request log: params plus hashes into api-request-shape
+  // (system prompt + tools) and api-request-blob (each message again, often
+  // 10 KB+). Also account/org owner ids and a tool-name tally. None of it is
+  // conversation the transcript doesn't already show.
+  'api-request', 'api-request-shape', 'api-request-blob', 'session-owner', 'tools-used',
 ]);
 
 // Attachment subtypes that are pure bookkeeping/reminders (SPIKE_NOTES and
@@ -39,6 +45,7 @@ const ATTACHMENT_DROP = new Set([
   'skill_listing', 'agent_listing_delta', 'batching_reminder_sent',
   'date_change', 'plan_mode', 'plan_mode_exit', 'command_permissions',
   'auto_mode', 'silent_turn_reminder', 'mcp_instructions_delta',
+  'deferred_tools_record',
 ]);
 
 const UUID_JSONL = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
@@ -418,6 +425,13 @@ export function claudeCodeAdapter(root = path.join(os.homedir(), '.claude', 'pro
         return [{ kind: 'meta', id, ts, label, raw: line, parentId }];
       }
 
+      // No uuid: off the conversation tree, so session state, not a row.
+      // Every such type seen so far is bookkeeping (SPIKE_NOTES 2026-11-18);
+      // an unrecognized one is tallied for the census instead of rendered.
+      if (!str(line.uuid)) {
+        const t = type ?? '?';
+        return [{ kind: 'meta', id, ts, label: t, raw: null, sessionPatch: { offTreeType: t } }];
+      }
       return [{ kind: 'unknown', id, ts, raw: line }];
     },
 
